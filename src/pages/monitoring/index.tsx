@@ -1,0 +1,343 @@
+import { useState } from 'react';
+import { Tabs, Table, Tag, Button, Space, Card, Row, Col, Modal, Form, Input, InputNumber, Select, DatePicker, Statistic } from 'antd';
+import { Activity, Ruler, Eye, Plus, Edit, TrendingUp, BarChart3 } from 'lucide-react';
+import useAppStore from '../../store';
+import LineChart from '../../components/charts/LineChart';
+import BarChart from '../../components/charts/BarChart';
+import type { TreeMeasurement, MonitoringRecord } from '../../types';
+
+const { TabPane } = Tabs;
+const { Option } = Select;
+
+const MonitoringPage: React.FC = () => {
+  const { projects, treeMeasurements, monitoringRecords, getMonitoringRecordsByProjectId, getMeasurementsBySubcompartmentId, getSubcompartmentsByProjectId } = useAppStore();
+  const [selectedProjectId, setSelectedProjectId] = useState<string>(projects[0]?.id || '');
+  const [selectedMeasurement, setSelectedMeasurement] = useState<TreeMeasurement | null>(null);
+  const [detailModalVisible, setDetailModalVisible] = useState(false);
+
+  const currentMonRecords = selectedProjectId ? getMonitoringRecordsByProjectId(selectedProjectId) : monitoringRecords;
+  const currentSubs = selectedProjectId ? getSubcompartmentsByProjectId(selectedProjectId) : [];
+  const currentMeasurements = currentSubs.flatMap(s => getMeasurementsBySubcompartmentId(s.id));
+
+  const measurementColumns = [
+    {
+      title: '测量日期',
+      dataIndex: 'measureDate',
+      key: 'measureDate',
+      width: 120,
+    },
+    {
+      title: '树种',
+      dataIndex: 'treeSpecies',
+      key: 'treeSpecies',
+      width: 120,
+    },
+    {
+      title: '胸径(cm)',
+      dataIndex: 'dbh',
+      key: 'dbh',
+      width: 100,
+      render: (val: number) => <span className="font-mono font-semibold text-forest-700">{val}</span>,
+    },
+    {
+      title: '树高(m)',
+      dataIndex: 'treeHeight',
+      key: 'treeHeight',
+      width: 100,
+      render: (val: number) => <span className="font-mono font-semibold text-sky-700">{val}</span>,
+    },
+    {
+      title: '冠幅(m)',
+      dataIndex: 'crownWidth',
+      key: 'crownWidth',
+      width: 100,
+      render: (val?: number) => val || '-',
+    },
+    {
+      title: '样地号',
+      dataIndex: 'samplePlotNo',
+      key: 'samplePlotNo',
+      width: 100,
+    },
+    {
+      title: '株数',
+      dataIndex: 'treeCount',
+      key: 'treeCount',
+      width: 80,
+    },
+    {
+      title: '操作',
+      key: 'action',
+      width: 120,
+      render: (_: unknown, record: TreeMeasurement) => (
+        <Space size="small">
+          <Button type="link" size="small" icon={<Eye size={14} />} onClick={() => {
+            setSelectedMeasurement(record);
+            setDetailModalVisible(true);
+          }}>
+            详情
+          </Button>
+          <Button type="link" size="small" icon={<Edit size={14} />}>编辑</Button>
+        </Space>
+      ),
+    },
+  ];
+
+  const monitoringColumns = [
+    {
+      title: '记录日期',
+      dataIndex: 'recordDate',
+      key: 'recordDate',
+      width: 120,
+    },
+    {
+      title: '碳汇增量(tCO₂e)',
+      dataIndex: 'carbonIncrement',
+      key: 'carbonIncrement',
+      render: (val: number) => <span className="font-mono font-semibold text-forest-700">{val.toFixed(2)}</span>,
+    },
+    {
+      title: '生物量(t)',
+      dataIndex: 'biomass',
+      key: 'biomass',
+      render: (val: number) => <span className="font-mono font-semibold text-earth-700">{val.toFixed(2)}</span>,
+    },
+    {
+      title: '监测方法',
+      dataIndex: 'monitoringMethod',
+      key: 'monitoringMethod',
+      width: 140,
+      render: (method: string) => (
+        <Tag color="blue">{method}</Tag>
+      ),
+    },
+    {
+      title: '监测人员',
+      dataIndex: 'monitoringPerson',
+      key: 'monitoringPerson',
+      width: 100,
+    },
+    {
+      title: '备注',
+      dataIndex: 'remarks',
+      key: 'remarks',
+      ellipsis: true,
+    },
+  ];
+
+  // 生长曲线数据
+  const growthData = {
+    months: ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'],
+    dbhGrowth: [0.1, 0.15, 0.2, 0.28, 0.35, 0.42, 0.45, 0.42, 0.38, 0.3, 0.22, 0.15],
+    heightGrowth: [0.2, 0.25, 0.32, 0.4, 0.5, 0.58, 0.62, 0.6, 0.52, 0.42, 0.32, 0.22],
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="stagger-item">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h2 className="text-2xl font-bold font-serif text-forest-800 mb-2">碳汇监测</h2>
+            <p className="text-forest-600/70">树种胸径测量和固碳增量监测</p>
+          </div>
+          <Space>
+            <Button type="primary" icon={<Plus size={16} />}>新增监测</Button>
+          </Space>
+        </div>
+      </div>
+
+      <div className="stagger-item mb-4">
+        <Card>
+          <div className="flex flex-wrap gap-4 items-center">
+            <span className="text-forest-700 font-medium">选择项目：</span>
+            <Select
+              value={selectedProjectId}
+              onChange={setSelectedProjectId}
+              style={{ width: 300 }}
+            >
+              {projects.map(p => (
+                <Option key={p.id} value={p.id}>{p.name}</Option>
+              ))}
+            </Select>
+          </div>
+        </Card>
+      </div>
+
+      <Row gutter={[16, 16]} className="stagger-item">
+        <Col xs={24} sm={12} lg={6}>
+          <Card className="card-hover">
+            <Statistic
+              title="监测记录数"
+              value={currentMonRecords.length}
+              suffix="条"
+              valueStyle={{ color: '#3d7a2d' }}
+              prefix={<Activity size={20} />}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <Card className="card-hover">
+            <Statistic
+              title="累计固碳增量"
+              value={currentMonRecords.reduce((sum, m) => sum + m.carbonIncrement, 0).toFixed(2)}
+              suffix="tCO₂e"
+              valueStyle={{ color: '#4A90A4' }}
+              prefix={<TrendingUp size={20} />}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <Card className="card-hover">
+            <Statistic
+              title="胸径测量数"
+              value={currentMeasurements.length}
+              suffix="次"
+              valueStyle={{ color: '#8B6914' }}
+              prefix={<Ruler size={20} />}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <Card className="card-hover">
+            <Statistic
+              title="平均胸径"
+              value={currentMeasurements.length > 0 ? (currentMeasurements.reduce((sum, m) => sum + m.dbh, 0) / currentMeasurements.length).toFixed(1) : 0}
+              suffix="cm"
+              valueStyle={{ color: '#D4A84B' }}
+              prefix={<BarChart3 size={20} />}
+            />
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]} className="stagger-item">
+        <Col xs={24} lg={12}>
+          <LineChart
+            title="林木生长曲线"
+            xData={growthData.months}
+            seriesData={[
+              {
+                name: '胸径生长(cm)',
+                data: growthData.dbhGrowth,
+                color: '#3d7a2d',
+                areaColor: 'rgba(61, 122, 45, 0.2)',
+              },
+              {
+                name: '树高生长(m)',
+                data: growthData.heightGrowth,
+                color: '#4A90A4',
+                areaColor: 'rgba(74, 144, 164, 0.2)',
+              },
+            ]}
+            yAxisName="生长量"
+          />
+        </Col>
+        <Col xs={24} lg={12}>
+          <BarChart
+            title="各季度碳汇增量"
+            xData={['Q1', 'Q2', 'Q3', 'Q4']}
+            seriesData={[
+              {
+                name: '碳汇增量(tCO₂e)',
+                data: [2800, 4200, 5100, 3800],
+                color: '#5d964a',
+              },
+            ]}
+            yAxisName="tCO₂e"
+          />
+        </Col>
+      </Row>
+
+      <div className="stagger-item">
+        <Tabs defaultActiveKey="1" className="bg-cream-50 rounded-xl">
+          <TabPane tab={<span className="font-medium"><Ruler size={16} className="inline mr-2" />树种胸径测量</span>} key="1">
+            <Card className="border-none">
+              <div className="flex flex-wrap gap-4 mb-4">
+                <Form layout="inline">
+                  <Form.Item name="subcompartment">
+                    <Select placeholder="选择小班" allowClear style={{ width: 200 }}>
+                      {currentSubs.map(s => (
+                        <Option key={s.id} value={s.id}>{s.code} - {s.name}</Option>
+                      ))}
+                    </Select>
+                  </Form.Item>
+                  <Form.Item name="date">
+                    <DatePicker.RangePicker />
+                  </Form.Item>
+                  <Button type="primary">查询</Button>
+                  <Button>重置</Button>
+                </Form>
+              </div>
+              <Table
+                columns={measurementColumns}
+                dataSource={currentMeasurements}
+                rowKey="id"
+                scroll={{ x: 1000 }}
+                pagination={{
+                  pageSize: 10,
+                  showSizeChanger: true,
+                  showTotal: (total) => `共 ${total} 条测量记录`,
+                }}
+              />
+            </Card>
+          </TabPane>
+
+          <TabPane tab={<span className="font-medium"><Activity size={16} className="inline mr-2" />固碳增量监测</span>} key="2">
+            <Card className="border-none">
+              <Table
+                columns={monitoringColumns}
+                dataSource={currentMonRecords}
+                rowKey="id"
+                scroll={{ x: 1000 }}
+                pagination={{
+                  pageSize: 10,
+                  showSizeChanger: true,
+                  showTotal: (total) => `共 ${total} 条监测记录`,
+                }}
+              />
+            </Card>
+          </TabPane>
+        </Tabs>
+      </div>
+
+      <Modal
+        title="测量详情"
+        open={detailModalVisible}
+        onCancel={() => setDetailModalVisible(false)}
+        footer={null}
+        width={600}
+      >
+        {selectedMeasurement && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <Card className="bg-forest-50 border-forest-200">
+                <p className="text-sm text-forest-600 mb-1">胸径 (DBH)</p>
+                <p className="text-3xl font-bold font-serif text-forest-700">{selectedMeasurement.dbh} <span className="text-lg">cm</span></p>
+              </Card>
+              <Card className="bg-sky-50 border-sky-200">
+                <p className="text-sm text-sky-600 mb-1">树高</p>
+                <p className="text-3xl font-bold font-serif text-sky-700">{selectedMeasurement.treeHeight} <span className="text-lg">m</span></p>
+              </Card>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="p-4 bg-gold-50 rounded-lg">
+                <p className="text-sm text-gold-600 mb-1">冠幅</p>
+                <p className="text-xl font-bold text-gold-700">{selectedMeasurement.crownWidth} m</p>
+              </div>
+              <div className="p-4 bg-earth-50 rounded-lg">
+                <p className="text-sm text-earth-600 mb-1">株数</p>
+                <p className="text-xl font-bold text-earth-700">{selectedMeasurement.treeCount} 株</p>
+              </div>
+            </div>
+            <div className="p-4 bg-cream-100 rounded-lg">
+              <p className="text-sm text-forest-600 mb-1">样地编号</p>
+              <p className="text-lg font-semibold text-forest-700">{selectedMeasurement.samplePlotNo}</p>
+            </div>
+          </div>
+        )}
+      </Modal>
+    </div>
+  );
+};
+
+export default MonitoringPage;

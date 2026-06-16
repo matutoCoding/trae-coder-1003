@@ -1,0 +1,105 @@
+/** @type {import('tailwindcss').Config} */
+
+export default {
+  darkMode: "class",
+  content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
+  theme: {
+    container: {
+      center: true,
+    },
+    extend: {
+      colors: {
+        forest: {
+          50: '#f0f5ee',
+          100: '#d9e6d3',
+          200: '#b3cda6',
+          300: '#86b374',
+          400: '#5d964a',
+          500: '#3d7a2d',
+          600: '#2D5A27',
+          700: '#24471f',
+          800: '#1c3819',
+          900: '#152a13',
+        },
+        earth: {
+          50: '#faf6ee',
+          100: '#f0e6cf',
+          200: '#e1cb9f',
+          300: '#d1ad6b',
+          400: '#c59446',
+          500: '#b87f33',
+          600: '#8B6914',
+          700: '#755510',
+          800: '#5e440f',
+          900: '#4a3510',
+        },
+        sky: {
+          50: '#f0f7f9',
+          100: '#d8ebf0',
+          200: '#b3d7e1',
+          300: '#84bfd0',
+          400: '#5da5bc',
+          500: '#4A90A4',
+          600: '#3d7688',
+          700: '#345f6e',
+          800: '#2d4e5a',
+          900: '#28424c',
+        },
+        gold: {
+          50: '#fdf8ed',
+          100: '#faedc7',
+          200: '#f5db8f',
+          300: '#eec452',
+          400: '#e9b230',
+          500: '#D4A84B',
+          600: '#b6882f',
+          700: '#976a27',
+          800: '#7a5526',
+          900: '#654724',
+        },
+        cream: {
+          50: '#fdfcf9',
+          100: '#faf7f0',
+          200: '#F5F1E8',
+          300: '#ece6d8',
+          400: '#e0d7c3',
+          500: '#d1c5ab',
+          600: '#b8a889',
+          700: '#9a8868',
+          800: '#7c6e56',
+          900: '#655a47',
+        },
+      },
+      fontFamily: {
+        serif: ['"Noto Serif SC"', 'serif'],
+        sans: ['"Noto Sans SC"', 'sans-serif'],
+      },
+      animation: {
+        'fade-in-up': 'fadeInUp 0.6s ease-out forwards',
+        'fade-in': 'fadeIn 0.4s ease-out forwards',
+        'slide-in-left': 'slideInLeft 0.3s ease-out forwards',
+        'count-up': 'countUp 1.5s ease-out forwards',
+        'pulse-slow': 'pulse 3s ease-in-out infinite',
+      },
+      keyframes: {
+        fadeInUp: {
+          '0%': { opacity: '0', transform: 'translateY(20px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+        fadeIn: {
+          '0%': { opacity: '0' },
+          '100%': { opacity: '1' },
+        },
+        slideInLeft: {
+          '0%': { opacity: '0', transform: 'translateX(-20px)' },
+          '100%': { opacity: '1', transform: 'translateX(0)' },
+        },
+        countUp: {
+          '0%': { opacity: '0', transform: 'translateY(10px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+      },
+    },
+  },
+  plugins: [],
+};
