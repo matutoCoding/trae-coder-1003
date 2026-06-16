@@ -186,6 +186,8 @@ export const mockVerifications: Verification[] = mockProjects.slice(0, 3).map((p
   verifiedAmount: [15200, 12800, 7000][idx],
   reportNo: `VER-2024-${String(idx + 1).padStart(4, '0')}`,
   remarks: '核查通过，数据真实有效',
+  content: '本次核查覆盖项目全部监测区域，采用样地实测与模型模拟相结合的方法，对项目期内的碳汇量进行了全面核实。核查内容包括：林木生长量监测、生物量计算、碳储量估算、泄漏评估、持久性论证等。经核查，项目碳汇计量方法符合《造林碳汇项目方法学》要求，监测数据真实可靠。',
+  attachments: ['核查报告.pdf', '现场核查照片.zip', '监测数据表.xlsx'],
 }));
 
 export const mockCarbonIssuances: CarbonIssuance[] = mockVerifications.map((ver, idx) => ({
@@ -197,6 +199,9 @@ export const mockCarbonIssuances: CarbonIssuance[] = mockVerifications.map((ver,
   certificateNo: `CCER-${2024 + idx}-${String(idx + 1).padStart(6, '0')}`,
   issuingAuthority: '国家应对气候变化战略研究和国际合作中心',
   status: 'issued' as const,
+  validFrom: `2024-${String(idx + 5).padStart(2, '0')}-01`,
+  validTo: `2029-${String(idx + 5).padStart(2, '0')}-01`,
+  remarks: '经审核，该项目符合国家核证自愿减排项目相关要求，准予签发。',
 }));
 
 export const mockTransactions: Transaction[] = mockCarbonIssuances.flatMap((iss, idx) => {

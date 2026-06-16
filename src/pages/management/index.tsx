@@ -1,12 +1,13 @@
-import { useState } from 'react';
-import { Tabs, Table, Tag, Button, Space, Card, Row, Col, Descriptions, Modal, Form, Input, Select, DatePicker, Statistic, Progress, Calendar, Badge } from 'antd';
-import { Sprout, FileText, Eye, Plus, Edit, Users, Calendar as CalendarIcon, TrendingUp, CheckCircle2 } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { Tabs, Table, Tag, Button, Space, Card, Row, Col, Descriptions, Modal, Form, Input, Select, DatePicker, Statistic, Progress, Calendar, Badge, InputNumber, message, Empty } from 'antd';
+import { Sprout, FileText, Eye, Plus, Edit, Users, Calendar as CalendarIcon, TrendingUp, CheckCircle2, Trash2 } from 'lucide-react';
 import dayjs, { Dayjs } from 'dayjs';
 import useAppStore from '../../store';
 import type { NursingTask } from '../../types';
 
 const { TabPane } = Tabs;
 const { Option } = Select;
+const { TextArea } = Input;
 
 const taskTypeMap: Record<string, { label: string; color: string }> = {
   tending: { label: '抚育间伐', color: 'green' },
@@ -24,12 +25,89 @@ const statusMap: Record<string, { label: string; color: string }> = {
 };
 
 const ManagementPage: React.FC = () => {
-  const { projects, nursingTasks, getNursingTasksByProjectId } = useAppStore();
+  const { projects, nursingTasks, getNursingTasksByProjectId, addNursingTask, updateNursingTask, deleteNursingTask } = useAppStore();
   const [selectedProjectId, setSelectedProjectId] = useState<string>(projects[0]?.id || '');
   const [selectedTask, setSelectedTask] = useState<NursingTask | null>(null);
   const [detailModalVisible, setDetailModalVisible] = useState(false);
+  const [formModalVisible, setFormModalVisible] = useState(false);
+  const [formMode, setFormMode] = useState<'add' | 'edit'>('add');
+  const [editingTask, setEditingTask] = useState<NursingTask | null>(null);
+  const [taskForm] = Form.useForm();
 
-  const currentTasks = selectedProjectId ? getNursingTasksByProjectId(selectedProjectId) : nursingTasks;
+  const currentTasks = useMemo(() => {
+    return selectedProjectId ? getNursingTasksByProjectId(selectedProjectId) : nursingTasks;
+  }, [selectedProjectId, nursingTasks, getNursingTasksByProjectId]);
+
+  const showAddForm = () => {
+    setFormMode('add');
+    setEditingTask(null);
+    taskForm.resetFields();
+    setFormModalVisible(true);
+  };
+
+  const showEditForm = (task: NursingTask) => {
+    setFormMode('edit');
+    setEditingTask(task);
+    taskForm.setFieldsValue({
+      taskName: task.taskName,
+      taskType: task.taskType,
+      planDate: dayjs(task.planDate),
+      executor: task.executor,
+      progress: task.progress,
+      status: task.status,
+      actualDate: task.actualDate ? dayjs(task.actualDate) : undefined,
+      workHours: task.workHours,
+      cost: task.cost,
+      effectEvaluation: task.effectEvaluation,
+    });
+    setFormModalVisible(true);
+  };
+
+  const handleFormSubmit = async () => {
+    try {
+      const values = await taskForm.validateFields();
+      const taskData = {
+        projectId: selectedProjectId,
+        taskName: values.taskName,
+        taskType: values.taskType,
+        planDate: values.planDate.format('YYYY-MM-DD'),
+        executor: values.executor,
+        progress: values.progress || 0,
+        status: values.status,
+        actualDate: values.actualDate ? values.actualDate.format('YYYY-MM-DD') : undefined,
+        workHours: values.workHours,
+        cost: values.cost,
+        effectEvaluation: values.effectEvaluation,
+      };
+
+      if (formMode === 'add') {
+        addNursingTask(taskData);
+        message.success('任务创建成功');
+      } else if (formMode === 'edit' && editingTask) {
+        updateNursingTask(editingTask.id, taskData);
+        message.success('任务更新成功');
+      }
+
+      setFormModalVisible(false);
+      taskForm.resetFields();
+    } catch (error) {
+      console.error('表单验证失败:', error);
+    }
+  };
+
+  const handleDelete = (id: string) => {
+    Modal.confirm({
+      title: '确认删除',
+      content: '确定要删除这个管护任务吗？删除后无法恢复。',
+      okText: '确定',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: () => {
+        deleteNursingTask(id);
+        message.success('任务删除成功');
+      },
+    });
+  };
 
   const taskColumns = [
     {
@@ -100,7 +178,7 @@ const ManagementPage: React.FC = () => {
     {
       title: '操作',
       key: 'action',
-      width: 120,
+      width: 180,
       fixed: 'right' as const,
       render: (_: unknown, record: NursingTask) => (
         <Space size="small">
@@ -110,8 +188,11 @@ const ManagementPage: React.FC = () => {
           }}>
             详情
           </Button>
-          <Button type="link" size="small" icon={<Edit size={14} />}>
+          <Button type="link" size="small" icon={<Edit size={14} />} onClick={() => showEditForm(record)}>
             编辑
+          </Button>
+          <Button type="link" size="small" danger icon={<Trash2 size={14} />} onClick={() => handleDelete(record.id)}>
+            删除
           </Button>
         </Space>
       ),
@@ -196,16 +277,18 @@ const ManagementPage: React.FC = () => {
     );
   };
 
-  const taskStats = {
+  const taskStats = useMemo(() => ({
     total: currentTasks.length,
     completed: currentTasks.filter(t => t.status === 'completed').length,
     inProgress: currentTasks.filter(t => t.status === 'inProgress').length,
     delayed: currentTasks.filter(t => t.status === 'delayed').length,
     totalCost: currentTasks.reduce((sum, t) => sum + (t.cost || 0), 0),
     totalHours: currentTasks.reduce((sum, t) => sum + (t.workHours || 0), 0),
-  };
+  }), [currentTasks]);
 
   const completionRate = taskStats.total > 0 ? Math.round((taskStats.completed / taskStats.total) * 100) : 0;
+
+  const completedTasks = useMemo(() => currentTasks.filter(t => t.status === 'completed'), [currentTasks]);
 
   return (
     <div className="space-y-6">
@@ -216,7 +299,7 @@ const ManagementPage: React.FC = () => {
             <p className="text-forest-600/70">营林抚育管护和抚育作业记录</p>
           </div>
           <Space>
-            <Button type="primary" icon={<Plus size={16} />}>新增任务</Button>
+            <Button type="primary" icon={<Plus size={16} />} onClick={showAddForm}>新增任务</Button>
           </Space>
         </div>
       </div>
@@ -369,6 +452,9 @@ const ManagementPage: React.FC = () => {
                     dataSource={currentTasks}
                     rowKey="id"
                     scroll={{ x: 1400 }}
+                    locale={{
+                      emptyText: <Empty description="暂无管护任务数据" />,
+                    }}
                     pagination={{
                       pageSize: 10,
                       showSizeChanger: true,
@@ -384,9 +470,12 @@ const ManagementPage: React.FC = () => {
             <Card className="border-none">
               <Table
                 columns={recordColumns}
-                dataSource={currentTasks.filter(t => t.status === 'completed')}
+                dataSource={completedTasks}
                 rowKey="id"
                 scroll={{ x: 1200 }}
+                locale={{
+                  emptyText: <Empty description="暂无作业记录数据" />,
+                }}
                 pagination={{ pageSize: 10 }}
               />
             </Card>
@@ -398,7 +487,19 @@ const ManagementPage: React.FC = () => {
         title="任务详情"
         open={detailModalVisible}
         onCancel={() => setDetailModalVisible(false)}
-        footer={null}
+        footer={[
+          <Button key="close" onClick={() => setDetailModalVisible(false)}>
+            关闭
+          </Button>,
+          <Button key="edit" type="primary" onClick={() => {
+            if (selectedTask) {
+              setDetailModalVisible(false);
+              showEditForm(selectedTask);
+            }
+          }}>
+            编辑任务
+          </Button>,
+        ]}
         width={700}
       >
         {selectedTask && (
@@ -453,6 +554,110 @@ const ManagementPage: React.FC = () => {
             )}
           </div>
         )}
+      </Modal>
+
+      <Modal
+        title={formMode === 'add' ? '新增管护任务' : '编辑管护任务'}
+        open={formModalVisible}
+        onCancel={() => {
+          setFormModalVisible(false);
+          taskForm.resetFields();
+          setEditingTask(null);
+        }}
+        onOk={handleFormSubmit}
+        okText="保存"
+        cancelText="取消"
+        width={700}
+        destroyOnClose
+      >
+        <Form form={taskForm} layout="vertical" size="middle">
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="taskName"
+                label="任务名称"
+                rules={[{ required: true, message: '请输入任务名称' }]}
+              >
+                <Input placeholder="请输入任务名称" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="taskType"
+                label="任务类型"
+                rules={[{ required: true, message: '请选择任务类型' }]}
+              >
+                <Select placeholder="请选择任务类型">
+                  {Object.entries(taskTypeMap).map(([key, val]) => (
+                    <Option key={key} value={key}>{val.label}</Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="planDate"
+                label="计划日期"
+                rules={[{ required: true, message: '请选择计划日期' }]}
+              >
+                <DatePicker style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="executor"
+                label="执行人"
+                rules={[{ required: true, message: '请输入执行人' }]}
+              >
+                <Input placeholder="请输入执行人" />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="progress"
+                label="进度(%)"
+                rules={[{ required: true, message: '请输入进度' }]}
+              >
+                <InputNumber style={{ width: '100%' }} min={0} max={100} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="status"
+                label="状态"
+                rules={[{ required: true, message: '请选择状态' }]}
+              >
+                <Select placeholder="请选择状态">
+                  {Object.entries(statusMap).map(([key, val]) => (
+                    <Option key={key} value={key}>{val.label}</Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="actualDate" label="实际完成日期">
+                <DatePicker style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="workHours" label="实际工时(h)">
+                <InputNumber style={{ width: '100%' }} min={0} step={0.5} />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item name="cost" label="成本(元)">
+            <InputNumber style={{ width: '100%' }} min={0} />
+          </Form.Item>
+          <Form.Item name="effectEvaluation" label="效果评估">
+            <TextArea rows={3} placeholder="请输入效果评估" />
+          </Form.Item>
+        </Form>
       </Modal>
     </div>
   );

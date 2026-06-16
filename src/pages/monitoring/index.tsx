@@ -1,6 +1,7 @@
-import { useState } from 'react';
-import { Tabs, Table, Tag, Button, Space, Card, Row, Col, Modal, Form, Input, InputNumber, Select, DatePicker, Statistic } from 'antd';
-import { Activity, Ruler, Eye, Plus, Edit, TrendingUp, BarChart3 } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { Tabs, Table, Tag, Button, Space, Card, Row, Col, Modal, Form, Input, InputNumber, Select, DatePicker, Statistic, message, Empty, Descriptions } from 'antd';
+import { Activity, Ruler, Eye, Plus, Edit, Trash2, TrendingUp, BarChart3 } from 'lucide-react';
+import dayjs from 'dayjs';
 import useAppStore from '../../store';
 import LineChart from '../../components/charts/LineChart';
 import BarChart from '../../components/charts/BarChart';
@@ -8,16 +9,146 @@ import type { TreeMeasurement, MonitoringRecord } from '../../types';
 
 const { TabPane } = Tabs;
 const { Option } = Select;
+const { TextArea } = Input;
 
 const MonitoringPage: React.FC = () => {
-  const { projects, treeMeasurements, monitoringRecords, getMonitoringRecordsByProjectId, getMeasurementsBySubcompartmentId, getSubcompartmentsByProjectId } = useAppStore();
+  const {
+    projects,
+    treeMeasurements,
+    monitoringRecords,
+    getMonitoringRecordsByProjectId,
+    getMeasurementsBySubcompartmentId,
+    getSubcompartmentsByProjectId,
+    addTreeMeasurement,
+    updateTreeMeasurement,
+    deleteTreeMeasurement,
+  } = useAppStore();
+
   const [selectedProjectId, setSelectedProjectId] = useState<string>(projects[0]?.id || '');
   const [selectedMeasurement, setSelectedMeasurement] = useState<TreeMeasurement | null>(null);
   const [detailModalVisible, setDetailModalVisible] = useState(false);
+  const [formModalVisible, setFormModalVisible] = useState(false);
+  const [formMode, setFormMode] = useState<'add' | 'edit'>('add');
+  const [editingMeasurement, setEditingMeasurement] = useState<TreeMeasurement | null>(null);
+  const [measurementForm] = Form.useForm();
 
   const currentMonRecords = selectedProjectId ? getMonitoringRecordsByProjectId(selectedProjectId) : monitoringRecords;
   const currentSubs = selectedProjectId ? getSubcompartmentsByProjectId(selectedProjectId) : [];
   const currentMeasurements = currentSubs.flatMap(s => getMeasurementsBySubcompartmentId(s.id));
+
+  const quarterlyCarbonData = useMemo(() => {
+    const quarters = ['Q1', 'Q2', 'Q3', 'Q4'];
+    const data = [0, 0, 0, 0];
+    currentMonRecords.forEach(record => {
+      const month = dayjs(record.recordDate).month();
+      const quarterIndex = Math.floor(month / 3);
+      if (quarterIndex >= 0 && quarterIndex < 4) {
+        data[quarterIndex] += record.carbonIncrement;
+      }
+    });
+    return quarters.map((q, i) => ({ quarter: q, value: Number(data[i].toFixed(2)) }));
+  }, [currentMonRecords]);
+
+  const growthData = useMemo(() => {
+    const months = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'];
+    const dbhGrowth: number[] = new Array(12).fill(0);
+    const heightGrowth: number[] = new Array(12).fill(0);
+    const counts: number[] = new Array(12).fill(0);
+
+    currentMeasurements.forEach(m => {
+      const month = dayjs(m.measureDate).month();
+      if (month >= 0 && month < 12) {
+        dbhGrowth[month] += m.dbh;
+        heightGrowth[month] += m.treeHeight;
+        counts[month] += 1;
+      }
+    });
+
+    const avgDbhGrowth = dbhGrowth.map((val, i) => counts[i] > 0 ? Number((val / counts[i] / 100).toFixed(2)) : 0);
+    const avgHeightGrowth = heightGrowth.map((val, i) => counts[i] > 0 ? Number((val / counts[i] / 100).toFixed(2)) : 0);
+
+    return {
+      months,
+      dbhGrowth: avgDbhGrowth,
+      heightGrowth: avgHeightGrowth,
+    };
+  }, [currentMeasurements]);
+
+  const showAddForm = () => {
+    setFormMode('add');
+    setEditingMeasurement(null);
+    measurementForm.resetFields();
+    setFormModalVisible(true);
+  };
+
+  const showEditForm = (record: TreeMeasurement) => {
+    setFormMode('edit');
+    setEditingMeasurement(record);
+    measurementForm.setFieldsValue({
+      subcompartmentId: record.subcompartmentId,
+      measureDate: dayjs(record.measureDate),
+      treeSpecies: record.treeSpecies,
+      dbh: record.dbh,
+      treeHeight: record.treeHeight,
+      crownWidth: record.crownWidth,
+      samplePlotNo: record.samplePlotNo,
+      treeCount: record.treeCount,
+    });
+    setFormModalVisible(true);
+  };
+
+  const handleFormSubmit = async () => {
+    try {
+      const values = await measurementForm.validateFields();
+      const measurementData = {
+        subcompartmentId: values.subcompartmentId,
+        measureDate: values.measureDate.format('YYYY-MM-DD'),
+        treeSpecies: values.treeSpecies,
+        dbh: values.dbh,
+        treeHeight: values.treeHeight,
+        crownWidth: values.crownWidth,
+        samplePlotNo: values.samplePlotNo,
+        treeCount: values.treeCount,
+      };
+
+      if (formMode === 'add') {
+        addTreeMeasurement(measurementData);
+        message.success('测量记录添加成功');
+      } else if (formMode === 'edit' && editingMeasurement) {
+        updateTreeMeasurement(editingMeasurement.id, measurementData);
+        message.success('测量记录更新成功');
+      }
+
+      setFormModalVisible(false);
+      measurementForm.resetFields();
+      setEditingMeasurement(null);
+    } catch (error) {
+      console.error('表单验证失败:', error);
+    }
+  };
+
+  const handleDelete = (id: string) => {
+    Modal.confirm({
+      title: '确认删除',
+      content: '确定要删除这条测量记录吗？删除后无法恢复。',
+      okText: '确定',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: () => {
+        deleteTreeMeasurement(id);
+        message.success('测量记录删除成功');
+      },
+    });
+  };
+
+  const showDetail = (record: TreeMeasurement) => {
+    setSelectedMeasurement(record);
+    setDetailModalVisible(true);
+  };
+
+  const getSubcompartmentInfo = (subId: string) => {
+    return currentSubs.find(s => s.id === subId);
+  };
 
   const measurementColumns = [
     {
@@ -68,16 +199,19 @@ const MonitoringPage: React.FC = () => {
     {
       title: '操作',
       key: 'action',
-      width: 120,
+      width: 180,
+      fixed: 'right' as const,
       render: (_: unknown, record: TreeMeasurement) => (
         <Space size="small">
-          <Button type="link" size="small" icon={<Eye size={14} />} onClick={() => {
-            setSelectedMeasurement(record);
-            setDetailModalVisible(true);
-          }}>
+          <Button type="link" size="small" icon={<Eye size={14} />} onClick={() => showDetail(record)}>
             详情
           </Button>
-          <Button type="link" size="small" icon={<Edit size={14} />}>编辑</Button>
+          <Button type="link" size="small" icon={<Edit size={14} />} onClick={() => showEditForm(record)}>
+            编辑
+          </Button>
+          <Button type="link" size="small" danger icon={<Trash2 size={14} />} onClick={() => handleDelete(record.id)}>
+            删除
+          </Button>
         </Space>
       ),
     },
@@ -125,13 +259,6 @@ const MonitoringPage: React.FC = () => {
     },
   ];
 
-  // 生长曲线数据
-  const growthData = {
-    months: ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'],
-    dbhGrowth: [0.1, 0.15, 0.2, 0.28, 0.35, 0.42, 0.45, 0.42, 0.38, 0.3, 0.22, 0.15],
-    heightGrowth: [0.2, 0.25, 0.32, 0.4, 0.5, 0.58, 0.62, 0.6, 0.52, 0.42, 0.32, 0.22],
-  };
-
   return (
     <div className="space-y-6">
       <div className="stagger-item">
@@ -141,7 +268,9 @@ const MonitoringPage: React.FC = () => {
             <p className="text-forest-600/70">树种胸径测量和固碳增量监测</p>
           </div>
           <Space>
-            <Button type="primary" icon={<Plus size={16} />}>新增监测</Button>
+            <Button type="primary" icon={<Plus size={16} />} onClick={showAddForm}>
+              新增测量
+            </Button>
           </Space>
         </div>
       </div>
@@ -235,11 +364,11 @@ const MonitoringPage: React.FC = () => {
         <Col xs={24} lg={12}>
           <BarChart
             title="各季度碳汇增量"
-            xData={['Q1', 'Q2', 'Q3', 'Q4']}
+            xData={quarterlyCarbonData.map(d => d.quarter)}
             seriesData={[
               {
                 name: '碳汇增量(tCO₂e)',
-                data: [2800, 4200, 5100, 3800],
+                data: quarterlyCarbonData.map(d => d.value),
                 color: '#5d964a',
               },
             ]}
@@ -273,6 +402,9 @@ const MonitoringPage: React.FC = () => {
                 dataSource={currentMeasurements}
                 rowKey="id"
                 scroll={{ x: 1000 }}
+                locale={{
+                  emptyText: <Empty description="暂无测量记录" />,
+                }}
                 pagination={{
                   pageSize: 10,
                   showSizeChanger: true,
@@ -289,6 +421,9 @@ const MonitoringPage: React.FC = () => {
                 dataSource={currentMonRecords}
                 rowKey="id"
                 scroll={{ x: 1000 }}
+                locale={{
+                  emptyText: <Empty description="暂无监测记录" />,
+                }}
                 pagination={{
                   pageSize: 10,
                   showSizeChanger: true,
@@ -303,8 +438,26 @@ const MonitoringPage: React.FC = () => {
       <Modal
         title="测量详情"
         open={detailModalVisible}
-        onCancel={() => setDetailModalVisible(false)}
-        footer={null}
+        onCancel={() => {
+          setDetailModalVisible(false);
+          setSelectedMeasurement(null);
+        }}
+        footer={[
+          <Button key="close" onClick={() => {
+            setDetailModalVisible(false);
+            setSelectedMeasurement(null);
+          }}>
+            关闭
+          </Button>,
+          <Button key="edit" type="primary" onClick={() => {
+            if (selectedMeasurement) {
+              setDetailModalVisible(false);
+              showEditForm(selectedMeasurement);
+            }
+          }}>
+            编辑记录
+          </Button>,
+        ]}
         width={600}
       >
         {selectedMeasurement && (
@@ -322,19 +475,120 @@ const MonitoringPage: React.FC = () => {
             <div className="grid grid-cols-2 gap-4">
               <div className="p-4 bg-gold-50 rounded-lg">
                 <p className="text-sm text-gold-600 mb-1">冠幅</p>
-                <p className="text-xl font-bold text-gold-700">{selectedMeasurement.crownWidth} m</p>
+                <p className="text-xl font-bold text-gold-700">{selectedMeasurement.crownWidth || '-'} m</p>
               </div>
               <div className="p-4 bg-earth-50 rounded-lg">
                 <p className="text-sm text-earth-600 mb-1">株数</p>
-                <p className="text-xl font-bold text-earth-700">{selectedMeasurement.treeCount} 株</p>
+                <p className="text-xl font-bold text-earth-700">{selectedMeasurement.treeCount || '-'} 株</p>
               </div>
             </div>
-            <div className="p-4 bg-cream-100 rounded-lg">
-              <p className="text-sm text-forest-600 mb-1">样地编号</p>
-              <p className="text-lg font-semibold text-forest-700">{selectedMeasurement.samplePlotNo}</p>
-            </div>
+            <Descriptions column={1} size="small" bordered>
+              <Descriptions.Item label="树种">{selectedMeasurement.treeSpecies}</Descriptions.Item>
+              <Descriptions.Item label="测量日期">{selectedMeasurement.measureDate}</Descriptions.Item>
+              <Descriptions.Item label="样地编号">{selectedMeasurement.samplePlotNo || '-'}</Descriptions.Item>
+              <Descriptions.Item label="所属小班">
+                {getSubcompartmentInfo(selectedMeasurement.subcompartmentId)
+                  ? `${getSubcompartmentInfo(selectedMeasurement.subcompartmentId)?.code} - ${getSubcompartmentInfo(selectedMeasurement.subcompartmentId)?.name}`
+                  : selectedMeasurement.subcompartmentId}
+              </Descriptions.Item>
+            </Descriptions>
           </div>
         )}
+      </Modal>
+
+      <Modal
+        title={formMode === 'add' ? '新增测量记录' : '编辑测量记录'}
+        open={formModalVisible}
+        onCancel={() => {
+          setFormModalVisible(false);
+          measurementForm.resetFields();
+          setEditingMeasurement(null);
+        }}
+        onOk={handleFormSubmit}
+        okText="保存"
+        cancelText="取消"
+        width={600}
+        destroyOnClose
+      >
+        <Form form={measurementForm} layout="vertical" size="middle">
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="subcompartmentId"
+                label="所属小班"
+                rules={[{ required: true, message: '请选择所属小班' }]}
+              >
+                <Select placeholder="请选择小班">
+                  {currentSubs.map(s => (
+                    <Option key={s.id} value={s.id}>{s.code} - {s.name}</Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="measureDate"
+                label="测量日期"
+                rules={[{ required: true, message: '请选择测量日期' }]}
+              >
+                <DatePicker style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="treeSpecies"
+                label="树种"
+                rules={[{ required: true, message: '请输入树种名称' }]}
+              >
+                <Input placeholder="请输入树种名称" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="samplePlotNo"
+                label="样地编号"
+              >
+                <Input placeholder="请输入样地编号" />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={16}>
+            <Col span={8}>
+              <Form.Item
+                name="dbh"
+                label="胸径(cm)"
+                rules={[{ required: true, message: '请输入胸径' }]}
+              >
+                <InputNumber style={{ width: '100%' }} min={0} step={0.1} precision={1} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item
+                name="treeHeight"
+                label="树高(m)"
+                rules={[{ required: true, message: '请输入树高' }]}
+              >
+                <InputNumber style={{ width: '100%' }} min={0} step={0.1} precision={1} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item
+                name="crownWidth"
+                label="冠幅(m)"
+              >
+                <InputNumber style={{ width: '100%' }} min={0} step={0.1} precision={1} />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item
+            name="treeCount"
+            label="株数"
+          >
+            <InputNumber style={{ width: '100%' }} min={0} step={1} precision={0} />
+          </Form.Item>
+        </Form>
       </Modal>
     </div>
   );

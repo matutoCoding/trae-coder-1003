@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { Tabs, Table, Tag, Button, Space, Card, Row, Col, Descriptions, Modal, Form, Input, Select, InputNumber, Statistic, Progress, Alert } from 'antd';
-import { Calculator, FileText, Eye, Plus, Edit, Database, TrendingUp, BarChart3 } from 'lucide-react';
+import { Tabs, Table, Tag, Button, Space, Card, Row, Col, Descriptions, Modal, Form, Input, Select, InputNumber, DatePicker, Statistic, Progress, Alert, message, Empty } from 'antd';
+import { Calculator, FileText, Eye, Plus, Edit, Trash2, Database, TrendingUp, BarChart3 } from 'lucide-react';
+import dayjs from 'dayjs';
 import useAppStore from '../../store';
 import BarChart from '../../components/charts/BarChart';
 import PieChart from '../../components/charts/PieChart';
@@ -10,14 +11,100 @@ const { TabPane } = Tabs;
 const { Option } = Select;
 
 const AccountingPage: React.FC = () => {
-  const { projects, biomassCalculations, getCalculationsByMeasurementId, treeMeasurements, getSubcompartmentsByProjectId } = useAppStore();
+  const {
+    projects,
+    biomassCalculations,
+    getCalculationsByMeasurementId,
+    treeMeasurements,
+    getSubcompartmentsByProjectId,
+    addBiomassCalculation,
+    updateBiomassCalculation,
+    deleteBiomassCalculation,
+  } = useAppStore();
+
   const [selectedProjectId, setSelectedProjectId] = useState<string>(projects[0]?.id || '');
   const [selectedCalc, setSelectedCalc] = useState<BiomassCalculation | null>(null);
   const [detailModalVisible, setDetailModalVisible] = useState(false);
+  const [formModalVisible, setFormModalVisible] = useState(false);
+  const [formMode, setFormMode] = useState<'add' | 'edit'>('add');
+  const [editingCalc, setEditingCalc] = useState<BiomassCalculation | null>(null);
+  const [calcForm] = Form.useForm();
 
   const currentSubs = selectedProjectId ? getSubcompartmentsByProjectId(selectedProjectId) : [];
   const currentMeasurements = currentSubs.flatMap(s => treeMeasurements.filter(m => m.subcompartmentId === s.id));
   const currentCalculations = currentMeasurements.flatMap(m => getCalculationsByMeasurementId(m.id));
+
+  const showAddForm = () => {
+    setFormMode('add');
+    setEditingCalc(null);
+    calcForm.resetFields();
+    setFormModalVisible(true);
+  };
+
+  const showEditForm = (record: BiomassCalculation) => {
+    setFormMode('edit');
+    setEditingCalc(record);
+    calcForm.setFieldsValue({
+      measurementId: record.measurementId,
+      modelType: record.modelType,
+      biomassAbove: record.biomassAbove,
+      biomassBelow: record.biomassBelow,
+      carbonStock: record.carbonStock,
+      co2Equivalent: record.co2Equivalent,
+      calculationDate: dayjs(record.calculationDate),
+      formula: record.formula,
+    });
+    setFormModalVisible(true);
+  };
+
+  const handleFormSubmit = async () => {
+    try {
+      const values = await calcForm.validateFields();
+      const calcData = {
+        measurementId: values.measurementId,
+        modelType: values.modelType,
+        biomassAbove: values.biomassAbove,
+        biomassBelow: values.biomassBelow,
+        carbonStock: values.carbonStock,
+        co2Equivalent: values.co2Equivalent,
+        calculationDate: values.calculationDate.format('YYYY-MM-DD'),
+        formula: values.formula,
+      };
+
+      if (formMode === 'add') {
+        addBiomassCalculation(calcData);
+        message.success('核算记录添加成功');
+      } else if (formMode === 'edit' && editingCalc) {
+        updateBiomassCalculation(editingCalc.id, calcData);
+        message.success('核算记录更新成功');
+      }
+
+      setFormModalVisible(false);
+      calcForm.resetFields();
+      setEditingCalc(null);
+    } catch (error) {
+      console.error('表单验证失败:', error);
+    }
+  };
+
+  const handleDelete = (id: string) => {
+    Modal.confirm({
+      title: '确认删除',
+      content: '确定要删除这条核算记录吗？删除后无法恢复。',
+      okText: '确定',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: () => {
+        deleteBiomassCalculation(id);
+        message.success('核算记录删除成功');
+      },
+    });
+  };
+
+  const showDetail = (record: BiomassCalculation) => {
+    setSelectedCalc(record);
+    setDetailModalVisible(true);
+  };
 
   const calcColumns = [
     {
@@ -60,14 +147,18 @@ const AccountingPage: React.FC = () => {
     {
       title: '操作',
       key: 'action',
-      width: 120,
+      width: 180,
+      fixed: 'right' as const,
       render: (_: unknown, record: BiomassCalculation) => (
         <Space size="small">
-          <Button type="link" size="small" icon={<Eye size={14} />} onClick={() => {
-            setSelectedCalc(record);
-            setDetailModalVisible(true);
-          }}>
+          <Button type="link" size="small" icon={<Eye size={14} />} onClick={() => showDetail(record)}>
             详情
+          </Button>
+          <Button type="link" size="small" icon={<Edit size={14} />} onClick={() => showEditForm(record)}>
+            编辑
+          </Button>
+          <Button type="link" size="small" danger icon={<Trash2 size={14} />} onClick={() => handleDelete(record.id)}>
+            删除
           </Button>
         </Space>
       ),
@@ -91,13 +182,32 @@ const AccountingPage: React.FC = () => {
     ],
   };
 
-  const modelDistribution = [
-    { name: '生物量扩展因子法', value: currentCalculations.length, color: '#3d7a2d' },
-  ];
+  const modelTypeCount: Record<string, number> = {};
+  currentCalculations.forEach(c => {
+    modelTypeCount[c.modelType] = (modelTypeCount[c.modelType] || 0) + 1;
+  });
+
+  const modelColors: Record<string, string> = {
+    '生物量扩展因子法': '#3d7a2d',
+    '蓄积量法': '#5d964a',
+    '生物量回归模型法': '#8B6914',
+    'IPCC默认值法': '#4A90A4',
+  };
+
+  const modelDistribution = Object.entries(modelTypeCount).map(([name, value]) => ({
+    name,
+    value,
+    color: modelColors[name] || '#3d7a2d',
+  }));
 
   const avgCarbonPerHectare = currentSubs.length > 0
     ? (currentCalculations.reduce((sum, c) => sum + c.co2Equivalent, 0) / currentSubs.reduce((sum, s) => sum + s.area, 0)).toFixed(2)
     : 0;
+
+  const measurementOptions = currentMeasurements.map(m => ({
+    value: m.id,
+    label: `${m.id} - ${m.treeSpecies} (${m.measureDate})`,
+  }));
 
   return (
     <div className="space-y-6">
@@ -108,7 +218,7 @@ const AccountingPage: React.FC = () => {
             <p className="text-forest-600/70">生物量碳储量核算和碳汇计量模型管理</p>
           </div>
           <Space>
-            <Button type="primary" icon={<Plus size={16} />}>新增核算</Button>
+            <Button type="primary" icon={<Plus size={16} />} onClick={showAddForm}>新增核算</Button>
           </Space>
         </div>
       </div>
@@ -212,17 +322,28 @@ const AccountingPage: React.FC = () => {
         <Tabs defaultActiveKey="1" className="bg-cream-50 rounded-xl">
           <TabPane tab={<span className="font-medium"><Calculator size={16} className="inline mr-2" />生物量碳储量核算</span>} key="1">
             <Card className="border-none">
-              <Table
-                columns={calcColumns}
-                dataSource={currentCalculations}
-                rowKey="id"
-                scroll={{ x: 1200 }}
-                pagination={{
-                  pageSize: 10,
-                  showSizeChanger: true,
-                  showTotal: (total) => `共 ${total} 条核算记录`,
-                }}
-              />
+              {currentCalculations.length === 0 ? (
+                <Empty
+                  description="暂无核算记录"
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                >
+                  <Button type="primary" icon={<Plus size={14} />} onClick={showAddForm}>
+                    新增核算记录
+                  </Button>
+                </Empty>
+              ) : (
+                <Table
+                  columns={calcColumns}
+                  dataSource={currentCalculations}
+                  rowKey="id"
+                  scroll={{ x: 1200 }}
+                  pagination={{
+                    pageSize: 10,
+                    showSizeChanger: true,
+                    showTotal: (total) => `共 ${total} 条核算记录`,
+                  }}
+                />
+              )}
             </Card>
           </TabPane>
 
@@ -316,11 +437,26 @@ const AccountingPage: React.FC = () => {
             <Descriptions title="核算基本信息" bordered column={2}>
               <Descriptions.Item label="核算日期">{selectedCalc.calculationDate}</Descriptions.Item>
               <Descriptions.Item label="模型类型">{selectedCalc.modelType}</Descriptions.Item>
-              <Descriptions.Item label="计算公式">{selectedCalc.formula}</Descriptions.Item>
+              <Descriptions.Item label="计算公式">{selectedCalc.formula || '-'}</Descriptions.Item>
               <Descriptions.Item label="关联测量ID">{selectedCalc.measurementId}</Descriptions.Item>
             </Descriptions>
 
-            <Row gutter={[16, 16]}>
+            <Descriptions title="核算参数" bordered column={2} className="mt-4">
+              <Descriptions.Item label="地上生物量">
+                <span className="font-mono font-semibold text-forest-700">{selectedCalc.biomassAbove.toFixed(4)} t</span>
+              </Descriptions.Item>
+              <Descriptions.Item label="地下生物量">
+                <span className="font-mono font-semibold text-earth-700">{selectedCalc.biomassBelow.toFixed(4)} t</span>
+              </Descriptions.Item>
+              <Descriptions.Item label="碳储量">
+                <span className="font-mono font-semibold text-sky-700">{selectedCalc.carbonStock.toFixed(4)} tC</span>
+              </Descriptions.Item>
+              <Descriptions.Item label="CO₂当量">
+                <span className="font-mono font-semibold text-gold-700">{selectedCalc.co2Equivalent.toFixed(4)} tCO₂e</span>
+              </Descriptions.Item>
+            </Descriptions>
+
+            <Row gutter={[16, 16]} className="mt-4">
               <Col xs={24} sm={12}>
                 <Card className="bg-forest-50 border-forest-200 text-center">
                   <p className="text-sm text-forest-600 mb-2">地上生物量</p>
@@ -348,6 +484,101 @@ const AccountingPage: React.FC = () => {
             </Row>
           </div>
         )}
+      </Modal>
+
+      <Modal
+        title={formMode === 'add' ? '新增核算记录' : '编辑核算记录'}
+        open={formModalVisible}
+        onCancel={() => {
+          setFormModalVisible(false);
+          calcForm.resetFields();
+          setEditingCalc(null);
+        }}
+        onOk={handleFormSubmit}
+        okText="保存"
+        cancelText="取消"
+        width={600}
+      >
+        <Form form={calcForm} layout="vertical">
+          <Row gutter={[16, 16]}>
+            <Col xs={24} sm={12}>
+              <Form.Item
+                label="测量ID"
+                name="measurementId"
+                rules={[{ required: true, message: '请选择测量ID' }]}
+              >
+                <Select placeholder="请选择关联的测量记录">
+                  {measurementOptions.map(opt => (
+                    <Option key={opt.value} value={opt.value}>{opt.label}</Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12}>
+              <Form.Item
+                label="计算模型"
+                name="modelType"
+                rules={[{ required: true, message: '请选择计算模型' }]}
+              >
+                <Select placeholder="请选择计算模型">
+                  {modelOptions.map(opt => (
+                    <Option key={opt.value} value={opt.value}>{opt.label}</Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12}>
+              <Form.Item
+                label="地上生物量(t)"
+                name="biomassAbove"
+                rules={[{ required: true, message: '请输入地上生物量' }]}
+              >
+                <InputNumber style={{ width: '100%' }} step={0.0001} precision={4} min={0} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12}>
+              <Form.Item
+                label="地下生物量(t)"
+                name="biomassBelow"
+                rules={[{ required: true, message: '请输入地下生物量' }]}
+              >
+                <InputNumber style={{ width: '100%' }} step={0.0001} precision={4} min={0} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12}>
+              <Form.Item
+                label="碳储量(tC)"
+                name="carbonStock"
+                rules={[{ required: true, message: '请输入碳储量' }]}
+              >
+                <InputNumber style={{ width: '100%' }} step={0.0001} precision={4} min={0} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12}>
+              <Form.Item
+                label="CO₂当量(tCO₂e)"
+                name="co2Equivalent"
+                rules={[{ required: true, message: '请输入CO₂当量' }]}
+              >
+                <InputNumber style={{ width: '100%' }} step={0.0001} precision={4} min={0} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12}>
+              <Form.Item
+                label="计算日期"
+                name="calculationDate"
+                rules={[{ required: true, message: '请选择计算日期' }]}
+              >
+                <DatePicker style={{ width: '100%' }} format="YYYY-MM-DD" />
+              </Form.Item>
+            </Col>
+            <Col xs={24}>
+              <Form.Item label="计算公式" name="formula">
+                <Input placeholder="请输入计算公式（选填）" />
+              </Form.Item>
+            </Col>
+          </Row>
+        </Form>
       </Modal>
     </div>
   );

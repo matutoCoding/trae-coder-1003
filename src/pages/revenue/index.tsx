@@ -1,23 +1,108 @@
-import { useState } from 'react';
-import { Tabs, Table, Tag, Button, Space, Card, Row, Col, Descriptions, Modal, Form, Input, Select, DatePicker, Statistic, Progress } from 'antd';
+import { useState, useMemo } from 'react';
+import { Tabs, Table, Tag, Button, Space, Card, Row, Col, Descriptions, Modal, Form, Input, Select, DatePicker, Statistic, Progress, Empty } from 'antd';
 import { Wallet, PieChart as PieChartIcon, Eye, Plus, TrendingUp, DollarSign, Users, FileText, CheckCircle2, BarChart3 } from 'lucide-react';
 import useAppStore from '../../store';
 import PieChart from '../../components/charts/PieChart';
 import BarChart from '../../components/charts/BarChart';
 import LineChart from '../../components/charts/LineChart';
-import type { RevenueDistribution } from '../../types';
+import type { RevenueDistribution, AnnualReport } from '../../types';
 
 const { TabPane } = Tabs;
 const { Option } = Select;
 
+const RECIPIENT_COLORS: Record<string, string> = {
+  '林场运营方': '#3d7a2d',
+  '当地政府': '#4A90A4',
+  '原住民社区': '#D4A84B',
+  '技术服务方': '#8B6914',
+};
+
 const RevenuePage: React.FC = () => {
-  const { projects, transactions, revenueDistributions, getDistributionsByTransactionId, getTransactionsByProjectId } = useAppStore();
+  const {
+    projects,
+    transactions,
+    getDistributionsByTransactionId,
+    getTransactionsByProjectId,
+    getAnnualReportsByProjectId,
+  } = useAppStore();
+
   const [selectedProjectId, setSelectedProjectId] = useState<string>(projects[0]?.id || '');
   const [selectedDistribution, setSelectedDistribution] = useState<RevenueDistribution | null>(null);
   const [detailModalVisible, setDetailModalVisible] = useState(false);
 
-  const currentTransactions = selectedProjectId ? getTransactionsByProjectId(selectedProjectId) : transactions;
-  const currentDistributions = currentTransactions.flatMap(t => getDistributionsByTransactionId(t.id));
+  const currentTransactions = useMemo(() => {
+    return selectedProjectId ? getTransactionsByProjectId(selectedProjectId) : [];
+  }, [selectedProjectId, getTransactionsByProjectId]);
+
+  const currentDistributions = useMemo(() => {
+    return currentTransactions.flatMap(t => getDistributionsByTransactionId(t.id));
+  }, [currentTransactions, getDistributionsByTransactionId]);
+
+  const currentReports = useMemo(() => {
+    return selectedProjectId ? getAnnualReportsByProjectId(selectedProjectId) : [];
+  }, [selectedProjectId, getAnnualReportsByProjectId]);
+
+  const currentProject = useMemo(() => {
+    return projects.find(p => p.id === selectedProjectId);
+  }, [selectedProjectId, projects]);
+
+  const recipientStats = useMemo(() => {
+    const map = new Map<string, number>();
+    currentDistributions.forEach(d => {
+      const current = map.get(d.recipient) || 0;
+      map.set(d.recipient, current + d.amount);
+    });
+    const total = currentDistributions.reduce((sum, d) => sum + d.amount, 0);
+    return Array.from(map.entries()).map(([name, amount]) => ({
+      name,
+      value: total > 0 ? Number(((amount / total) * 100).toFixed(1)) : 0,
+      amount,
+      color: RECIPIENT_COLORS[name] || '#6b7280',
+    }));
+  }, [currentDistributions]);
+
+  const revenueTrendData = useMemo(() => {
+    const yearMap = new Map<string, number>();
+    currentTransactions.forEach(t => {
+      const year = t.transactionDate.substring(0, 4);
+      const current = yearMap.get(year) || 0;
+      yearMap.set(year, current + t.totalAmount);
+    });
+    const sortedYears = Array.from(yearMap.keys()).sort();
+    return {
+      years: sortedYears,
+      revenue: sortedYears.map(y => yearMap.get(y) || 0),
+    };
+  }, [currentTransactions]);
+
+  const projectRevenueData = useMemo(() => {
+    const colors = ['#3d7a2d', '#4A90A4', '#D4A84B', '#8B6914', '#6b7280'];
+    return projects.map((p, idx) => {
+      const trans = getTransactionsByProjectId(p.id);
+      const total = trans.reduce((sum, t) => sum + t.totalAmount, 0);
+      return {
+        name: p.name.slice(0, 8),
+        revenue: total,
+        color: colors[idx % colors.length],
+      };
+    });
+  }, [projects, getTransactionsByProjectId]);
+
+  const totalRevenue = useMemo(() => {
+    return currentDistributions.reduce((sum, d) => sum + d.amount, 0);
+  }, [currentDistributions]);
+
+  const paidAmount = useMemo(() => {
+    return currentDistributions.filter(d => d.status === 'paid').reduce((sum, d) => sum + d.amount, 0);
+  }, [currentDistributions]);
+
+  const pendingAmount = useMemo(() => {
+    return currentDistributions.filter(d => d.status === 'pending').reduce((sum, d) => sum + d.amount, 0);
+  }, [currentDistributions]);
+
+  const paymentRate = useMemo(() => {
+    return totalRevenue > 0 ? Math.round((paidAmount / totalRevenue) * 100) : 0;
+  }, [totalRevenue, paidAmount]);
 
   const distributionColumns = [
     {
@@ -87,44 +172,53 @@ const RevenuePage: React.FC = () => {
 
   const reportColumns = [
     {
-      title: '项目名称',
-      dataIndex: 'projectName',
-      key: 'projectName',
-      width: 200,
-    },
-    {
       title: '年度',
       dataIndex: 'year',
       key: 'year',
+      width: 120,
+    },
+    {
+      title: '提交日期',
+      dataIndex: 'submitDate',
+      key: 'submitDate',
+      width: 120,
+    },
+    {
+      title: '审核人',
+      dataIndex: 'auditor',
+      key: 'auditor',
       width: 100,
     },
     {
-      title: '碳汇交易量',
-      dataIndex: 'quantity',
-      key: 'quantity',
-      render: (val: number) => `${val.toLocaleString()} tCO₂e`,
-    },
-    {
-      title: '交易总收入',
-      dataIndex: 'totalAmount',
-      key: 'totalAmount',
-      render: (val: number) => `${val.toLocaleString()} 元`,
-    },
-    {
-      title: '分配总金额',
-      dataIndex: 'distributedAmount',
-      key: 'distributedAmount',
-      render: (val: number) => `${val.toLocaleString()} 元`,
+      title: '审核日期',
+      dataIndex: 'auditDate',
+      key: 'auditDate',
+      width: 120,
     },
     {
       title: '报告状态',
       dataIndex: 'status',
       key: 'status',
-      render: () => <Tag color="success">已完成</Tag>,
+      render: (status: AnnualReport['status']) => {
+        const map = {
+          draft: { color: 'default', text: '草稿' },
+          submitted: { color: 'processing', text: '已提交' },
+          approved: { color: 'success', text: '已通过' },
+          rejected: { color: 'error', text: '已驳回' },
+        };
+        return <Tag color={map[status].color}>{map[status].text}</Tag>;
+      },
+    },
+    {
+      title: '摘要',
+      dataIndex: 'summary',
+      key: 'summary',
+      ellipsis: true,
     },
     {
       title: '操作',
       key: 'action',
+      width: 150,
       render: () => (
         <Space>
           <Button type="link" size="small" icon={<FileText size={14} />}>查看报告</Button>
@@ -134,62 +228,16 @@ const RevenuePage: React.FC = () => {
     },
   ];
 
-  const recipientStats = [
-    { name: '林场运营方', value: 50, amount: 1250000, color: '#3d7a2d' },
-    { name: '当地政府', value: 20, amount: 500000, color: '#4A90A4' },
-    { name: '原住民社区', value: 20, amount: 500000, color: '#D4A84B' },
-    { name: '技术服务方', value: 10, amount: 250000, color: '#8B6914' },
-  ];
-
-  const revenueTrendData = {
-    months: ['2021', '2022', '2023', '2024'],
-    revenue: [800000, 1500000, 2000000, 2500000],
-  };
-
-  const projectRevenueData = projects.slice(0, 3).map((p, idx) => {
-    const trans = getTransactionsByProjectId(p.id);
-    const total = trans.reduce((sum, t) => sum + t.totalAmount, 0);
-    return {
-      name: p.name.slice(0, 8),
-      revenue: total,
-      color: ['#3d7a2d', '#4A90A4', '#D4A84B'][idx],
-    };
-  });
-
-  const totalRevenue = currentDistributions.reduce((sum, d) => sum + d.amount, 0);
-  const paidAmount = currentDistributions.filter(d => d.status === 'paid').reduce((sum, d) => sum + d.amount, 0);
-  const pendingAmount = currentDistributions.filter(d => d.status === 'pending').reduce((sum, d) => sum + d.amount, 0);
-  const paymentRate = totalRevenue > 0 ? Math.round((paidAmount / totalRevenue) * 100) : 0;
-
-  const yearlyReports = [
-    {
-      id: '1',
-      projectName: '大兴安岭林业碳汇项目',
-      year: '2024',
-      quantity: 8500,
-      totalAmount: 425000,
-      distributedAmount: 425000,
-      status: 'approved',
-    },
-    {
-      id: '2',
-      projectName: '西双版纳热带雨林修复项目',
-      year: '2024',
-      quantity: 7200,
-      totalAmount: 360000,
-      distributedAmount: 360000,
-      status: 'approved',
-    },
-    {
-      id: '3',
-      projectName: '张家界公益林保护项目',
-      year: '2024',
-      quantity: 4000,
-      totalAmount: 200000,
-      distributedAmount: 200000,
-      status: 'approved',
-    },
-  ];
+  const renderChartEmpty = (description: string) => (
+    <Card
+      title={<h3 className="text-lg font-semibold font-serif text-forest-800 m-0">{description}</h3>}
+      className="stagger-item card-hover"
+    >
+      <div className="flex items-center justify-center" style={{ height: 300 }}>
+        <Empty description="暂无数据" />
+      </div>
+    </Card>
+  );
 
   return (
     <div className="space-y-6">
@@ -276,31 +324,43 @@ const RevenuePage: React.FC = () => {
 
       <Row gutter={[16, 16]} className="stagger-item">
         <Col xs={24} lg={8}>
-          <PieChart
-            title="收益分配比例"
-            data={recipientStats}
-            height={300}
-          />
+          {recipientStats.length > 0 ? (
+            <PieChart
+              title="收益分配比例"
+              data={recipientStats}
+              height={300}
+            />
+          ) : (
+            renderChartEmpty('收益分配比例')
+          )}
         </Col>
         <Col xs={24} lg={8}>
-          <LineChart
-            title="年度收益趋势"
-            xData={revenueTrendData.months}
-            seriesData={[{ name: '收益金额', data: revenueTrendData.revenue, color: '#3d7a2d' }]}
-            height={300}
-          />
+          {revenueTrendData.years.length > 0 ? (
+            <LineChart
+              title="年度收益趋势"
+              xData={revenueTrendData.years}
+              seriesData={[{ name: '收益金额', data: revenueTrendData.revenue, color: '#3d7a2d' }]}
+              height={300}
+            />
+          ) : (
+            renderChartEmpty('年度收益趋势')
+          )}
         </Col>
         <Col xs={24} lg={8}>
-          <BarChart
-            title="各项目收益对比"
-            xData={projectRevenueData.map(d => d.name)}
-            seriesData={projectRevenueData.map((d, idx) => ({
-              name: d.name,
-              data: [d.revenue],
-              color: d.color,
-            }))}
-            height={300}
-          />
+          {projectRevenueData.some(d => d.revenue > 0) ? (
+            <BarChart
+              title="各项目收益对比"
+              xData={projectRevenueData.map(d => d.name)}
+              seriesData={projectRevenueData.map((d) => ({
+                name: d.name,
+                data: [d.revenue],
+                color: d.color,
+              }))}
+              height={300}
+            />
+          ) : (
+            renderChartEmpty('各项目收益对比')
+          )}
         </Col>
       </Row>
 
@@ -312,6 +372,9 @@ const RevenuePage: React.FC = () => {
                 columns={distributionColumns}
                 dataSource={currentDistributions}
                 rowKey="id"
+                locale={{
+                  emptyText: <Empty description="暂无分配记录" />,
+                }}
                 pagination={{
                   pageSize: 10,
                   showSizeChanger: true,
@@ -323,8 +386,11 @@ const RevenuePage: React.FC = () => {
             <TabPane tab={<span className="flex items-center gap-2"><FileText size={16} />项目年度报告</span>} key="2">
               <Table
                 columns={reportColumns}
-                dataSource={yearlyReports}
+                dataSource={currentReports}
                 rowKey="id"
+                locale={{
+                  emptyText: <Empty description="暂无年度报告" />,
+                }}
                 pagination={{
                   pageSize: 10,
                   showSizeChanger: true,

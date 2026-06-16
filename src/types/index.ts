@@ -75,6 +75,8 @@ export interface Verification {
   verifiedAmount: number;
   reportNo?: string;
   remarks?: string;
+  content?: string;
+  attachments?: string[];
 }
 
 export interface CarbonIssuance {
@@ -86,6 +88,9 @@ export interface CarbonIssuance {
   certificateNo: string;
   issuingAuthority: string;
   status: 'issued' | 'pending' | 'revoked';
+  validFrom?: string;
+  validTo?: string;
+  remarks?: string;
 }
 
 export interface Transaction {
@@ -100,6 +105,7 @@ export interface Transaction {
   totalAmount: number;
   contractNo?: string;
   status: 'completed' | 'pending' | 'cancelled';
+  remarks?: string;
 }
 
 export interface RevenueDistribution {
